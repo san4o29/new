@@ -19,7 +19,19 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[
+        {"role": "user", "content": "Що таке karta pobytu?"}
+    ]
+)
+
+answer = response.choices[0].message.content
+
 
 # Відповіді на старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
