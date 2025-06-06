@@ -1,169 +1,158 @@
 import os
 import logging
-from telegram import (
-    Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from openai import OpenAI
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, ConversationHandler, filters, CallbackQueryHandler
+    ContextTypes, filters
 )
 from langdetect import detect
-from openai import OpenAI
 
+# Логування
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# Состояния для ConversationHandler
-SELECT_COUNTRY, SELECT_LANGUAGE, HANDLE_QUESTION, FEEDBACK = range(4)
-
-# Инициализация OpenAI клиента
+# Змінні середовища
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+PORT = int(os.environ.get("PORT", 8000))
 
-# Поддерживаемые страны и языки
-COUNTRIES = ["Україна", "Білорусь", "Молдова", "Грузія", "Індонезія", "Колумбія", "Філіппіни", "Непал"]
-LANGUAGES = {
-    "uk": "Українська",
-    "ru": "Російська",
-    "pl": "Польська",
-    "en": "Англійська",
-    "es": "Іспанська",
-    "id": "Індонезійська"
-}
+# OpenAI клієнт
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Расширенная офлайн база FAQ (пример, добавил es и id)
-offline_faq = {
+# База знань
+faq_data = {
     "україна": {
-        "uk": {
-            "як отримати карту побиту?": "Карту побиту можна отримати через подачу документів до воєводського управління...",
-            "які документи потрібні для легалізації?": "Потрібно надати паспорт, дозвіл на роботу, підтвердження житла...",
-        },
-        "ru": {
-            "как получить карту побыту?": "Карту побыту можно получить подав документы в воеводское управление...",
-            "какие документы нужны для легализации?": "Нужно предоставить паспорт, разрешение на работу, подтверждение жилья...",
-        },
-        "pl": {
-            "jak otrzymać kartę pobytu?": "Kartę pobytu można otrzymać poprzez złożenie dokumentów do urzędu wojewódzkiego...",
-            "jakie dokumenty są potrzebne do legalizacji?": "Należy przedstawić paszport, pozwolenie na pracę, potwierdzenie miejsca zamieszkania...",
-        },
-        "en": {
-            "how to get a residence card?": "You can get a residence card by submitting documents to the voivodeship office...",
-            "what documents are needed for legalization?": "You need to provide a passport, work permit, proof of accommodation...",
-        },
-        "es": {
-            "¿cómo obtener una tarjeta de residencia?": "Puede obtener una tarjeta de residencia presentando documentos en la oficina de la voivodía...",
-            "¿qué documentos se necesitan para la legalización?": "Necesita presentar pasaporte, permiso de trabajo, comprobante de alojamiento...",
-        },
-        "id": {
-            "bagaimana cara mendapatkan kartu tinggal?": "Anda dapat memperoleh kartu tinggal dengan menyerahkan dokumen ke kantor wojewódzki...",
-            "dokumen apa saja yang diperlukan untuk legalisasi?": "Anda perlu menyerahkan paspor, izin kerja, bukti tempat tinggal...",
-        }
+        "uk": [
+            {
+                "keywords": ["карта побиту", "тимчасове перебування", "документи на карту"],
+                "answer": "Громадяни України можуть подати на карту побиту на підставі роботи, навчання або родинних зв’язків. Заява подається до Воєводського управління за місцем проживання. Необхідно підготувати паспорт, фото, підтвердження доходів, медичну страховку, договір оренди та інші документи.\nПроцес може займати 3–6 місяців.",
+                "advice": "Зберігайте копії всіх документів та подавайте заяву рекомендованим листом з повідомленням про вручення."
+            },
+            {
+                "keywords": ["тимчасовий захист", "status UKR", "захист для українців"],
+                "answer": "Польща надала тимчасовий захист (status UKR) українцям, які прибули після 24 лютого 2022 року. Він дозволяє легальне перебування, доступ до ринку праці, освіти та медичних послуг.",
+                "advice": "Зареєструйтеся у системі PESEL якнайшвидше для повного доступу до прав."
+            },
+            {
+                "keywords": ["робота", "дозвіл на роботу", "працевлаштування"],
+                "answer": "Українці можуть працювати в Польщі без дозволу на роботу за умови повідомлення працедавцем через портал praca.gov.pl. Це правило стосується осіб з тимчасовим захистом, візою або іншим дозволеним перебуванням.",
+                "advice": "Перевіряйте, чи роботодавець справді подав повідомлення до Urząd Pracy."
+            }
+        ]
     },
-    # Другие страны можно добавить аналогично
+    "білорусь": {
+        "ru": [
+            {
+                "keywords": ["карта побыту", "воеводское приглашение", "легализация"],
+                "answer": "Граждане Беларуси могут подать на карту побыту на основании работы, бизнеса, учёбы или воссоединения семьи. Процедура такая же, как и для других иностранцев: подача заявления, сбор документов, ожидание решения.\nСрок рассмотрения — от 3 до 8 месяцев.",
+                "advice": "Храните подтверждения подачи документов, особенно если вы подаётесь по почте."
+            },
+            {
+                "keywords": ["работа", "официальное трудоустройство", "разрешение"],
+                "answer": "Для официальной работы в Польше белорусам требуется разрешение на работу типа A или карта побыту с правом на труд.\nНекоторые работодатели могут получить разрешение централизованно через воеводство.",
+                "advice": "Убедитесь, что у вас есть копия разрешения на работу, выданная работодателем."
+            }
+        ]
+    },
+    "молдова": {
+        "ru": [
+            {
+                "keywords": ["безвиз", "работа", "легализация"],
+                "answer": "Граждане Молдовы могут пребывать в Польше до 90 дней без визы. Для легального проживания и работы нужно подать заявление на карту побыту.\nНеобходимо иметь контракт, страхование, жильё и подтверждение доходов.",
+                "advice": "Подавайте заявление до окончания безвизового периода."
+            }
+        ]
+    },
+    "грузія": {
+        "ru": [
+            {
+                "keywords": ["виза", "карта побыту", "проживание"],
+                "answer": "Граждане Грузии могут пребывать в Польше до 90 дней без визы. Для проживания и работы нужно оформить карту побыту или получить визу типа D.\nПри подаче важно предоставить все документы, включая медицинскую страховку.",
+                "advice": "Проверяйте актуальные правила въезда на сайте польского МИД."
+            }
+        ]
+    },
+    "індонезія": {
+        "id": [
+            {
+                "keywords": ["izin tinggal", "kartu tinggal", "visa kerja"],
+                "answer": "Warga negara Indonesia harus memiliki visa kerja (tipe D) atau izin tinggal untuk tinggal dan bekerja di Polandia.\nPermohonan dilakukan di kantor Voivodeship dan memerlukan dokumen seperti paspor, kontrak kerja, dan asuransi.",
+                "advice": "Ajukan aplikasi sedini mungkin sebelum visa Anda habis masa berlakunya."
+            }
+        ]
+    },
+    "колумбія": {
+        "es": [
+            {
+                "keywords": ["residencia", "trabajar", "permiso de trabajo"],
+                "answer": "Los ciudadanos colombianos necesitan una visa nacional tipo D para trabajar o residir legalmente en Polonia.\nPosteriormente pueden solicitar la tarjeta de residencia temporal ('karta pobytu').",
+                "advice": "Asegúrese de tener un contrato de trabajo válido antes de iniciar el proceso."
+            }
+        ]
+    },
+    "філіпіни": {
+        "en": [
+            {
+                "keywords": ["residence permit", "work permit", "visa"],
+                "answer": "Citizens of the Philippines need a national D visa and a work permit to stay and work legally in Poland.\nLater, they can apply for a temporary residence card ('karta pobytu').",
+                "advice": "Make sure your employer provides the correct documents for your visa application."
+            }
+        ]
+    },
+    "непал": {
+        "en": [
+            {
+                "keywords": ["work in poland", "residence card", "legal stay"],
+                "answer": "Nepali citizens must apply for a national visa and work permit before entering Poland.\nTo stay long-term, you will need to apply for a residence card through the voivodeship office.",
+                "advice": "Be cautious with agencies—verify job offers before applying for a visa."
+            }
+        ]
+    }
 }
 
-# Поиск ответа в FAQ
-def find_answer(country_key, lang_key, question_text):
-    country_data = offline_faq.get(country_key.lower())
-    if not country_data:
-        return None
-    lang_data = country_data.get(lang_key)
-    if not lang_data:
-        return None
-    q = question_text.lower()
-    for known_question, answer in lang_data.items():
-        if known_question in q:
-            return answer
+# Визначення мови
+def detect_language(text):
+    try:
+        return detect(text)
+    except:
+        return "unknown"
+
+# Пошук відповіді
+def find_answer(user_text, user_lang):
+    for country, langs in faq_data.items():
+        for lang, questions in langs.items():
+            if user_lang == lang:
+                for q in questions:
+                    if any(keyword.lower() in user_text.lower() for keyword in q["keywords"]):
+                        return f"{q['answer']}\n\n💡 {q['advice']}"
     return None
 
-# Команда /start
+# Обробка команди /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[KeyboardButton(country)] for country in COUNTRIES]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    keyboard = [["Україна 🇺🇦", "Білорусь 🇧🇾"], ["Молдова 🇲🇩", "Грузія 🇬🇪"],
+                ["Індонезія 🇮🇩", "Колумбія 🇨🇴"], ["Філіпіни 🇵🇭", "Непал 🇳🇵"],
+                ["Зворотній зв'язок"]]
     await update.message.reply_text(
-        "Виберіть, будь ласка, вашу країну:",
-        reply_markup=reply_markup
+        "🌍 Оберіть вашу країну походження:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
-    return SELECT_COUNTRY
 
-async def select_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    selected_country = update.message.text
-    if selected_country not in COUNTRIES:
-        await update.message.reply_text("Будь ласка, виберіть країну зі списку.")
-        return SELECT_COUNTRY
-    context.user_data['country'] = selected_country.lower()
+# Обробка повідомлень
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    lang = detect_language(user_message)
+    answer = find_answer(user_message, lang)
 
-    keyboard = [[KeyboardButton(name)] for code, name in LANGUAGES.items()]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text(
-        "Оберіть мову спілкування / Choose your language:",
-        reply_markup=reply_markup
-    )
-    return SELECT_LANGUAGE
-
-async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    selected_language = update.message.text
-    lang_code = None
-    for code, name in LANGUAGES.items():
-        if name.lower() == selected_language.lower():
-            lang_code = code
-            break
-    if not lang_code:
-        await update.message.reply_text("Будь ласка, виберіть мову зі списку.")
-        return SELECT_LANGUAGE
-    context.user_data['language'] = lang_code
-
-    # Добавляем кнопку обратной связи в меню
-    keyboard = [
-        [KeyboardButton("Задати питання")],
-        [KeyboardButton("Залишити відгук")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-
-    await update.message.reply_text(
-        f"Ви обрали країну: {context.user_data['country'].capitalize()} та мову: {selected_language}.\n"
-        "Ви можете задати питання про легалізацію або залишити відгук.",
-        reply_markup=reply_markup
-    )
-    return HANDLE_QUESTION
-
-# Обработка выбора из главного меню (вопрос или отзыв)
-async def handle_question_or_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.lower()
-    if text in ["залишити відгук", "оставить отзыв", "leave feedback", "berikan umpan balik", "dejar comentarios"]:
-        await update.message.reply_text(
-            "Будь ласка, напишіть ваш відгук або пропозицію:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return FEEDBACK
-    elif text in ["задати питання", "задать вопрос", "ask a question", "tanyakan pertanyaan", "hacer una pregunta"]:
-        await update.message.reply_text(
-            "Будь ласка, поставте ваше питання:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return HANDLE_QUESTION
+    if answer:
+        await update.message.reply_text(answer)
     else:
-        # Обрабатываем как вопрос по умолчанию
-        return await handle_question(update, context)
-
-async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    user_lang = detect(user_text)
-    country = context.user_data.get('country')
-    if not country:
-        await update.message.reply_text("Спочатку виберіть країну командою /start")
-        return ConversationHandler.END
-
-    # Сначала пытаемся найти офлайн ответ
-    answer = find_answer(country, user_lang, user_text)
-
-    if not answer:
-        # Если нет оффлайн ответа — вызываем OpenAI GPT-3.5
-        prompt = f"Відповідай простою мовою на питання користувача про легалізацію в Польщі.\nПитання: {user_text}"
         try:
-            response = openai_client.chat.completions.create(
+            prompt = f"Користувач задає питання про легалізацію в Польщі. Відповідай простою мовою. Питання: {user_message}"
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "Ти експерт із легалізації в Польщі."},
@@ -172,80 +161,16 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 temperature=0.7,
                 max_tokens=500
             )
-            answer = response.choices[0].message.content
+            await update.message.reply_text(response.choices[0].message.content)
         except Exception as e:
             logging.error(f"OpenAI error: {e}")
-            answer = {
-                "uk": "Виникла помилка при отриманні відповіді. Спробуйте пізніше.",
-                "ru": "Произошла ошибка при получении ответа. Попробуйте позже.",
-                "pl": "Wystąpił błąd podczas uzyskiwania odpowiedzi. Spróbuj później.",
-                "en": "An error occurred while getting the answer. Please try again later.",
-                "es": "Se produjo un error al obtener la respuesta. Por favor, inténtelo de nuevo más tarde.",
-                "id": "Terjadi kesalahan saat mendapatkan jawaban. Silakan coba lagi nanti."
-            }.get(user_lang, "Виникла помилка при отриманні відповіді. Спробуйте пізніше.")
+            await update.message.reply_text("⚠️ Помилка при отриманні відповіді. Спробуйте пізніше.")
 
-    await update.message.reply_text(answer)
-    return HANDLE_QUESTION
-
-# Обработка обратной связи
-async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    feedback_text = update.message.text
-    user_id = update.message.from_user.id
-    logging.info(f"Feedback from user {user_id}: {feedback_text}")
-
-    # Можно сюда добавить отправку в БД или email
-
-    await update.message.reply_text(
-        "Дякуємо за ваш відгук! Він дуже важливий для нас.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    # После фидбека возвращаем в меню с выбором
-    keyboard = [
-        [KeyboardButton("Задати питання")],
-        [KeyboardButton("Залишити відгук")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-    await update.message.reply_text(
-        "Ви можете задати ще питання або залишити відгук.",
-        reply_markup=reply_markup
-    )
-    return HANDLE_QUESTION
-
-# Команда /cancel
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Дякую, що скористалися ботом! Для початку введіть /start",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    return ConversationHandler.END
-
+# Запуск бота через webhook
 def main():
-    TOKEN = os.getenv("BOT_TOKEN")
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    PORT = int(os.environ.get("PORT", 8000))
-
     app = ApplicationBuilder().token(TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            SELECT_COUNTRY: [MessageHandler(filters.TEXT & (~filters.COMMAND), select_country)],
-            SELECT_LANGUAGE: [MessageHandler(filters.TEXT & (~filters.COMMAND), select_language)],
-            HANDLE_QUESTION: [
-                MessageHandler(filters.Regex("^(Задати питання|задать вопрос|ask a question|tanyakan pertanyaan|hacer una pregunta)$"), handle_question_or_feedback),
-                MessageHandler(filters.Regex("^(Залишити відгук|оставить отзыв|leave feedback|berikan umpan balik|dejar comentarios)$"), handle_question_or_feedback),
-                MessageHandler(filters.TEXT & (~filters.COMMAND), handle_question)
-            ],
-            FEEDBACK: [MessageHandler(filters.TEXT & (~filters.COMMAND), handle_feedback)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True
-    )
-
-    app.add_handler(conv_handler)
-
-    # Запуск webhook на Render
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
