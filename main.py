@@ -49,21 +49,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = f"Користувач питає про легалізацію в Польщі. Відповідай простою мовою.\nПитання: {user_message}"
 
     try:
-        response = client.chat.completions.create(
-    model="gpt-3.5-turbo",  # або gpt-4, якщо маєш доступ
-    messages=[
-        {"role": "system", "content": "Ти експерт із легалізації в Польщі."},
-        {"role": "user", "content": prompt}
-    ],
-    temperature=0.7,
-    max_tokens=500
-)
-answer = response.choices[0].message.content
-        await update.message.reply_text(answer)
-
-    except Exception as e:
-        logging.error(f"OpenAI error: {e}")
-        await update.message.reply_text("Виникла помилка при отриманні відповіді. Спробуйте пізніше.")
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "Ти експерт із легалізації в Польщі."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.7,
+        max_tokens=500
+    )
+    answer = response.choices[0].message.content
+    await update.message.reply_text(answer)
+except Exception as e:
+    logging.error(f"OpenAI error: {e}")
+    await update.message.reply_text("Виникла помилка при отриманні відповіді. Спробуйте пізніше.")
 
 # Запуск webhook
 def main():
