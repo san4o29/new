@@ -50,15 +50,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # або "gpt-4", якщо у тебе є доступ
-            messages=[
-                {"role": "system", "content": "Ти експерт із легалізації в Польщі."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-        answer = response.choices[0].message.content
+    model="gpt-3.5-turbo",  # або gpt-4, якщо маєш доступ
+    messages=[
+        {"role": "system", "content": "Ти експерт із легалізації в Польщі."},
+        {"role": "user", "content": prompt}
+    ],
+    temperature=0.7,
+    max_tokens=500
+)
+answer = response.choices[0].message.content
         await update.message.reply_text(answer)
 
     except Exception as e:
