@@ -1,6 +1,6 @@
 import os
 import logging
-import openai
+from openai import OpenAI
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
@@ -19,21 +19,10 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-from openai import OpenAI
+# Ініціалізація OpenAI клієнта
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "user", "content": "Що таке karta pobytu?"}
-    ]
-)
-
-answer = response.choices[0].message.content
-
-
-# Відповіді на старт
+# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["/start", "Допомога"], ["Що таке karta pobytu?"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -60,8 +49,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = f"Користувач питає про легалізацію в Польщі. Відповідай простою мовою.\nПитання: {user_message}"
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # або "gpt-4", якщо у тебе є доступ
             messages=[
                 {"role": "system", "content": "Ти експерт із легалізації в Польщі."},
                 {"role": "user", "content": prompt}
@@ -69,7 +58,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             temperature=0.7,
             max_tokens=500
         )
-        answer = response['choices'][0]['message']['content']
+        answer = response.choices[0].message.content
         await update.message.reply_text(answer)
 
     except Exception as e:
@@ -91,4 +80,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
